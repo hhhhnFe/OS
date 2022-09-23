@@ -46,7 +46,7 @@ process_execute (const char *file_name)
   tid = thread_create (fn, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
-    
+
   return tid;
 }
 
@@ -62,12 +62,14 @@ start_process (void *file_name_)
   bool success;
   /* Initialize interrupt frame and load executable. */
 
-  printf("hello!!!!!!!!!!!\n");
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
+
+  hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
+  
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) 
@@ -95,7 +97,11 @@ start_process (void *file_name_)
    does nothing. */
 int
 process_wait (tid_t child_tid UNUSED) 
-{
+{ 
+  while(1)
+  {
+
+  }
   return -1;
 }
 
@@ -221,19 +227,22 @@ load (const char *file_name, void (**eip) (void), void **esp)
   struct file *file = NULL;
   off_t file_ofs;
   bool success = false;
-  int i;
-
-  printf("coorect\n");
+  int i, argc, token_len, align;
+  char *argv[32], *saveptr, *token;
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();
 
-  // TODO : parse file name
-  printf("hello\n");
-  printf("filename : %s\n", file_name);
-  
+  argc = 0;
+  token = strtok_r((char*) file_name, " ", &saveptr);
+  while (token != NULL)
+  {
+    argv[argc++] = token;
+    token = strtok_r(NULL, " ", &saveptr);
+  }
+
   /* Open executable file. */
   file = filesys_open (file_name);
   if (file == NULL) 
@@ -315,9 +324,49 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  // TODO : construct stack by editing setup_stack(esp)
   if (!setup_stack (esp))
     goto done;
+
+  align = 0;
+  void *ret_address = *esp;
+  for (i = 0; i < argc; i++)
+  {
+    token_len = strlen(argv[argc - i - 1]) + 1;
+    *esp -= token_len;
+    align += token_len;
+    memcpy(*esp, argv[argc -i - 1], token_len);
+    argv[argc -i -1] = *esp;
+    printf("esp : %x, saved : %s\\0\n", *esp, *(char**)esp);
+  }
+  align %= 4;
+  align = 4 - align;
+  *esp -= align;
+  if (align)
+    memset(*esp, 0, align);
+  
+  *esp -= 4;
+  memset(*esp, 0, 4);
+  printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
+
+  for (i = 0; i < argc; i++)
+  {
+    *esp -= 4;
+    memcpy(*esp, &argv[argc - i - 1], 4);
+    printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
+  }
+
+  argv[0] = *esp;
+  *esp -= 4;
+  memcpy(*esp, &argv[0], 4);
+  printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
+
+  *esp -= 4;
+  memcpy(*esp, &argc, 4);
+  printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
+
+  *esp -= 4;
+  memset(*esp, 0, 4);
+  printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
