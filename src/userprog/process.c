@@ -68,7 +68,7 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
 
-  hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
+  //hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
   
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -336,7 +336,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     align += token_len;
     memcpy(*esp, argv[argc -i - 1], token_len);
     argv[argc -i -1] = *esp;
-    printf("esp : %x, saved : %s\\0\n", *esp, *(char**)esp);
+    //printf("esp : %x, saved : %s\\0\n", *esp, *(char**)esp);
   }
   align %= 4;
   align = 4 - align;
@@ -346,27 +346,27 @@ load (const char *file_name, void (**eip) (void), void **esp)
   
   *esp -= 4;
   memset(*esp, 0, 4);
-  printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
+  //printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
 
   for (i = 0; i < argc; i++)
   {
     *esp -= 4;
     memcpy(*esp, &argv[argc - i - 1], 4);
-    printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
+    //printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
   }
 
   argv[0] = *esp;
   *esp -= 4;
   memcpy(*esp, &argv[0], 4);
-  printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
+  //printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
 
   *esp -= 4;
   memcpy(*esp, &argc, 4);
-  printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
+  //printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
 
   *esp -= 4;
   memset(*esp, 0, 4);
-  printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
+  //printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
