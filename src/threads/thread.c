@@ -200,7 +200,7 @@ thread_create (const char *name, int priority,
 
   /* Add to run queue. */
   thread_unblock (t);
-
+  
   return tid;
 }
 
@@ -467,6 +467,18 @@ init_thread (struct thread *t, const char *name, int priority)
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
+
+  #ifdef USERPROG
+	/*exit status flag*/
+	t->fl = 0;
+	
+	/*enroll current thread as child of running thread*/
+		list_init(&t->child_list);
+		list_push_back(&running_thread()->child_list, &t->child_elem);
+	/*initialise semaphore variables*/
+		sema_init(&t->wait_child, 0);
+		sema_init(&t->exit_child, 0);
+	#endif
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and

@@ -17,7 +17,6 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-#include "threads/malloc.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -30,8 +29,8 @@ tid_t
 process_execute (const char *file_name) 
 {
   char *fn_copy;
-  char *fn, *saveptr;
-
+  char *temp, *fn, *saveptr;
+  struct file *file;
   tid_t tid;
 
   /* Make a copy of FILE_NAME.
@@ -40,13 +39,29 @@ process_execute (const char *file_name)
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
-  fn = strtok_r((char*) file_name, " ", &saveptr);
+
+  temp = palloc_get_page (0);
+  strlcpy(temp, fn_copy, PGSIZE);
+  fn = strtok_r(temp, " ", &saveptr);
+
+  file = filesys_open(fn);
+  if (file == NULL) return -1;
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (fn, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
+  else{
+	  struct thread *cur = thread_current ();
+		struct list_elem* e = list_pop_back(&cur -> child_list);
+		struct thread* child = list_entry(e, struct thread, child_elem);
 
+		sema_down(&child -> wait_child);
+		if (!child -> fl) tid = TID_ERROR;
+		else  list_push_back(&cur -> child_list, e);
+	}
+
+  palloc_free_page(temp);
   return tid;
 }
 
@@ -67,8 +82,8 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
-
-  //hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
+  thread_current() -> fl = success;
+	sema_up(&thread_current() -> wait_child);
   
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -98,10 +113,25 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 { 
-  while(1)
-  {
+  struct thread *cur = thread_current ();
+  struct thread *temp;
+  struct list_elem *e;
+  int exit_status;
 
-  }
+  for (e = list_begin(&cur -> child_list); e != list_end(&cur -> child_list); e = list_next(e)){
+    temp = list_entry(e, struct thread, child_elem);
+    if (temp == NULL)
+			return -1;
+		else if (temp -> tid == child_tid)
+    {
+			sema_down(&temp -> wait_child); 
+			exit_status = temp -> exit_status;
+			list_remove(&temp -> child_elem);
+			sema_up(&temp -> exit_child); 
+			return exit_status;
+    }
+	}
+
   return -1;
 }
 
@@ -128,6 +158,9 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+
+  sema_up(&cur -> wait_child);
+	sema_down(&cur -> exit_child);
 }
 
 /* Sets up the CPU for running user code in the current
@@ -229,6 +262,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   bool success = false;
   int i, argc, token_len, align;
   char *argv[32], *saveptr, *token;
+
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
@@ -244,10 +278,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
   }
 
   /* Open executable file. */
-  file = filesys_open (file_name);
+  file = filesys_open (argv[0]);
   if (file == NULL) 
     {
-      printf ("load: %s: open failed\n", file_name);
+      printf ("load: %s: open failed\n", argv[0]);
       goto done; 
     }
   
@@ -260,7 +294,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
       || ehdr.e_phnum > 1024) 
     {
-      printf ("load: %s: error loading executable\n", file_name);
+      printf ("load: %s: error loading executable\n", argv[0]);
       goto done; 
     }
 
@@ -328,7 +362,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
 
   align = 0;
-  void *ret_address = *esp;
   for (i = 0; i < argc; i++)
   {
     token_len = strlen(argv[argc - i - 1]) + 1;
@@ -336,7 +369,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
     align += token_len;
     memcpy(*esp, argv[argc -i - 1], token_len);
     argv[argc -i -1] = *esp;
-    //printf("esp : %x, saved : %s\\0\n", *esp, *(char**)esp);
   }
   align %= 4;
   align = 4 - align;
@@ -346,31 +378,25 @@ load (const char *file_name, void (**eip) (void), void **esp)
   
   *esp -= 4;
   memset(*esp, 0, 4);
-  //printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
 
   for (i = 0; i < argc; i++)
   {
     *esp -= 4;
     memcpy(*esp, &argv[argc - i - 1], 4);
-    //printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
   }
 
   argv[0] = *esp;
   *esp -= 4;
   memcpy(*esp, &argv[0], 4);
-  //printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
 
   *esp -= 4;
   memcpy(*esp, &argc, 4);
-  //printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
 
   *esp -= 4;
   memset(*esp, 0, 4);
-  //printf("esp : %x, saved : %x\n", *esp, **(int**)esp);
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
-
   success = true;
 
  done:
