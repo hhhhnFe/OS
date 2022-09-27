@@ -73,7 +73,7 @@
                  [arg0] "r" (ARG0),                             \
                  [arg1] "r" (ARG1),                             \
                  [arg2] "r" (ARG2),                             \
-                 [arg2] "r" (ARG3)                              \
+                 [arg3] "r" (ARG3)                              \
                : "memory");                                     \
           retval;                                               \
         })
@@ -199,4 +199,13 @@ int
 inumber (int fd) 
 {
   return syscall1 (SYS_INUMBER, fd);
+}
+
+int max_of_four_int(int i1, int i2, int i3, int i4)
+{
+  return syscall4 (MAX_OF_FOUR_INT, i1, i2, i3, i4);
+}
+int fibonacci(int num)
+{
+  return syscall1 (FIBONACCI, num);
 }

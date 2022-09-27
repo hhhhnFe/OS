@@ -74,6 +74,31 @@ int write(int fd, const void* buffer, unsigned len)
   return total_len;
 }
 
+int fibonacci(int num)
+{
+  int now , before, temp;
+  if (num <= 1) return num;
+
+  before = 0; now = 1;
+  for (int i = 1; i < num; i++)
+  {
+    temp = now;
+    now += before;
+    before = temp;
+  }
+
+  return now;
+}
+
+int max_of_four_int(int i1, int i2, int i3, int i4)
+{
+  int ret = (i1 > i2) ? i1 : i2;
+  ret = (ret > i3) ? ret : i3;
+  ret = (ret > i4) ? ret : i4;
+
+  return ret;
+}
+
 void check_valid(void *ptr, struct intr_frame *f, int size)
 {
     if (!is_user_vaddr (ptr) || !is_user_vaddr (ptr + size - 1)
@@ -123,11 +148,14 @@ syscall_handler (struct intr_frame *f UNUSED)
       if ((int) ptr[1] == 1 && (void*) ptr[2] == NULL) exit(-1, f);
       f -> eax = write((int) ptr[1], (void*) ptr[2], (size_t) ptr[3]);
       break;
-    /*
-    case FIBONACCI: // 4 arguments
+    case FIBONACCI: // 1 arguments
+      check_valid(&ptr[1], f, sizeof(unsigned int));
+      if ((int) ptr[1] < 0) exit(-1, f);
+      f -> eax = fibonacci((int) ptr[1]);
       break;
-    case MAX_OF_FOR_INT // 4 arguments
-      break
-    */ 
+    case MAX_OF_FOUR_INT: // 4 arguments
+      check_valid(&ptr[1], f, 4 * sizeof(unsigned int));
+      f -> eax = max_of_four_int((int) ptr[1], (int) ptr[2], (int) ptr[3], (int) ptr[4]);
+      break;
   }
 }
