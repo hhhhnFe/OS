@@ -37,13 +37,54 @@ void exit (int status, struct intr_frame *f)
   thread_exit ();
 }
 
-int read (int fd, void *buffer, unsigned len)
+bool create (const char *file, unsigned initial_size)
 {
-  int total_len;
+  return filesys_create(file, initial_size);
+}
+
+bool remove (const char *file)
+{
+  return filesys_remove(file);
+}
+
+int open (const char *file, struct intr_frame *f)
+{
+  lock_acquire(&filesys_lock);
+  struct file* fp = filesys_open(file);
+
+  if (fp == NULL)
+    return -1;
+
+  struct thread *cur_thread = thread_current();
+  for (int i = 3; i < 128; i++)
+  {
+    if (cur_thread-> t_fd[i] == NULL)
+    {
+      thread_current() -> t_fd[i] = fp;
+      lock_release(&filesys_lock);
+      return i;
+    }
+  }
+
+  lock_release(&filesys_lock);
+  return -1;
+}
+
+int filesize (int fd, struct intr_frame *f)
+{
+  struct file* file = thread_current() -> t_fd[fd];
+
+  if (file == NULL) exit(-1, f);
+  return file_length(file);
+}
+      
+
+int read (int fd, void *buffer, unsigned len, struct intr_frame *f)
+{
+  int total_len = 0;
   unsigned i;
 
   lock_acquire(&filesys_lock);
-  // only from STDIN
   if (fd == 0)
   {
     for (i = 0; i < len; i++)
@@ -52,29 +93,92 @@ int read (int fd, void *buffer, unsigned len)
     }
     total_len = i;
   }
+  else if (fd == 1)
+  {
+    lock_release(&filesys_lock);
+    exit(-1, f);
+  }
+  else
+  {
+    struct file* file = thread_current() -> t_fd[fd];
+    if (file == NULL)
+      {
+        lock_release(&filesys_lock);
+        exit(-1, f);
+      }
+      total_len = file_read(file, buffer, len);
+  }
 
   lock_release(&filesys_lock);
+
   return total_len;
 }
 
-int write(int fd, const void* buffer, unsigned len)
+int write (int fd, const void* buffer, unsigned len, struct intr_frame *f)
 {
-  int total_len;
+  int total_len = 0;
 
   lock_acquire(&filesys_lock);
-
-  // only to STDOUT
   if (fd == 1)
   {
     putbuf(buffer, len);
     total_len = len;
+  }
+  else if (fd == 0)
+  {
+    lock_release(&filesys_lock);
+    exit(-1, f);
+  }
+  else
+  {
+    struct file* file = thread_current() -> t_fd[fd];
+    if (file == NULL)
+      {
+        lock_release(&filesys_lock);
+        exit(-1, f);
+      }
+    if (file -> deny_write == false) total_len = file_write(file, buffer, len);
   }
 
   lock_release(&filesys_lock);
   return total_len;
 }
 
-int fibonacci(int num)
+void seek (int fd, unsigned pos, struct intr_frame *f)
+{
+  lock_acquire(&filesys_lock);
+  struct file* file = thread_current() -> t_fd[fd];
+  if (file == NULL) exit(-1, f);
+
+  file_seek(file, pos);
+  lock_release(&filesys_lock);
+}
+
+unsigned tell (int fd, struct intr_frame *f)
+{
+  lock_acquire(&filesys_lock);
+
+  struct file* file = thread_current() -> t_fd[fd];
+  if (file == NULL) exit(-1, f);
+  unsigned ret = file_tell(file);
+
+  lock_release(&filesys_lock);
+  return ret;
+}
+
+void close (int fd, struct intr_frame *f)
+{
+  lock_acquire(&filesys_lock);
+
+  struct file* file = thread_current() -> t_fd[fd];
+  if (file == NULL) exit(-1, f);
+  thread_current() -> t_fd[fd] = NULL;
+  file_close(file);
+
+  lock_release(&filesys_lock);
+}
+
+int fibonacci (int num)
 {
   int now , before, temp;
   if (num <= 1) return num;
@@ -90,7 +194,7 @@ int fibonacci(int num)
   return now;
 }
 
-int max_of_four_int(int i1, int i2, int i3, int i4)
+int max_of_four_int (int i1, int i2, int i3, int i4)
 {
   int ret = (i1 > i2) ? i1 : i2;
   ret = (ret > i3) ? ret : i3;
@@ -99,7 +203,7 @@ int max_of_four_int(int i1, int i2, int i3, int i4)
   return ret;
 }
 
-void check_valid(void *ptr, struct intr_frame *f, int size)
+void check_valid (void *ptr, struct intr_frame *f, int size)
 {
     if (!is_user_vaddr (ptr) || !is_user_vaddr (ptr + size - 1)
     || pagedir_get_page (thread_current () -> pagedir, ptr) == NULL
@@ -136,17 +240,51 @@ syscall_handler (struct intr_frame *f UNUSED)
       check_valid(&ptr[1], f, sizeof(unsigned int));
       f -> eax = process_wait(ptr[1]);
       break;
+    case SYS_CREATE: // 1 : filename, 2 : initial_size
+      check_valid(&ptr[1], f, 2 * sizeof(unsigned int));
+      check_valid((char*) ptr[1], f, 1);
+      if (ptr[1] == NULL) exit(-1, f);
+      f -> eax = create((char*) ptr[1], (unsigned) ptr[2]);
+      break;
+    case SYS_REMOVE: // 1 : filename
+      check_valid(&ptr[1], f, sizeof(unsigned int));
+      check_valid((char*) ptr[1], f, 1);
+      if (ptr[1] == NULL) exit(-1, f);
+      f -> eax = remove((char*) ptr[1]);
+      break;
+    case SYS_OPEN: // 1 : filename
+      check_valid(&ptr[1], f, sizeof(unsigned int));
+      check_valid((char*) ptr[1], f, 1);
+      if (ptr[1] == NULL) exit(-1, f);
+      f -> eax = open((char*) ptr[1], f);
+      break;
+    case SYS_FILESIZE: // 1 : fd
+      check_valid(&ptr[1], f, sizeof(unsigned int));
+      f -> eax = filesize(ptr[1], f);
+      break;
     case SYS_READ: // 1 : int fd, 2 : void *buffer, unsigned size
       check_valid(&ptr[1], f, 3 * sizeof(unsigned int));
       check_valid((void*) ptr[2], f, ptr[3]);
       if ((int) ptr[1] == 0 && (void*) ptr[2] == NULL) exit(-1, f);
-      f -> eax = read((int) ptr[1], (void*) ptr[2], (size_t) ptr[3]);
+      f -> eax = read((int) ptr[1], (void*) ptr[2], (size_t) ptr[3], f);
       break;
     case SYS_WRITE: // 1 : int fd, 2 : void *buffer, unsigned size
       check_valid(&ptr[1], f, 3 * sizeof(unsigned int));
       check_valid((void*) ptr[2], f, ptr[3]);
       if ((int) ptr[1] == 1 && (void*) ptr[2] == NULL) exit(-1, f);
-      f -> eax = write((int) ptr[1], (void*) ptr[2], (size_t) ptr[3]);
+      f -> eax = write((int) ptr[1], (void*) ptr[2], (size_t) ptr[3], f);
+      break;
+    case SYS_SEEK: // 1 : fd, 2 : position
+      check_valid(&ptr[1], f, 2 * sizeof(unsigned int));
+      seek(ptr[1], ptr[2], f);
+      break;
+    case SYS_TELL: // 1 : fd
+      check_valid(&ptr[1], f, sizeof(unsigned int));
+      f -> eax = tell(ptr[1], f);
+      break;
+    case SYS_CLOSE: // 1 : fd
+      check_valid(&ptr[1], f, sizeof(unsigned int));
+      close(ptr[1], f);
       break;
     case FIBONACCI: // 1 arguments
       check_valid(&ptr[1], f, sizeof(unsigned int));

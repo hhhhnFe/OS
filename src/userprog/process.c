@@ -73,6 +73,7 @@ static void
 start_process (void *file_name_)
 {
   char *file_name = file_name_;
+  struct thread *cur = thread_current();
   struct intr_frame if_;
   bool success;
   /* Initialize interrupt frame and load executable. */
@@ -82,8 +83,10 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
-  thread_current() -> fl = success;
-	sema_up(&thread_current() -> wait_child);
+
+  if (cur -> cur_file != NULL) file_deny_write(cur -> cur_file);
+  cur-> fl = success;
+	sema_up(&cur -> wait_child);
   
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -158,6 +161,7 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+  if (cur -> cur_file != NULL) file_close(cur -> cur_file);
 
   sema_up(&cur -> wait_child);
 	sema_down(&cur -> exit_child);
@@ -284,7 +288,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
       printf ("load: %s: open failed\n", argv[0]);
       goto done; 
     }
-  
+  t->cur_file = file;
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
       || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)

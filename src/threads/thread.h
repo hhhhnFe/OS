@@ -103,6 +103,9 @@ struct thread
 	struct list child_list;
 	struct list_elem child_elem; 
    bool fl;
+
+   struct file* t_fd[128];
+   struct file* cur_file;
 #endif
 
     /* Owned by thread.c. */
