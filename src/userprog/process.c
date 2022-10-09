@@ -67,8 +67,6 @@ process_execute (const char *file_name)
 
 /* A thread function that loads a user process and starts it
    running. */
-
-// start_process cannot printf() from start!!!
 static void
 start_process (void *file_name_)
 {
@@ -161,7 +159,13 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
-  if (cur -> cur_file != NULL) file_close(cur -> cur_file);
+
+  for (int i = 3; i < 128; i++) 
+  {
+    file_close(cur -> t_fd[i]);
+    cur -> t_fd[i] = NULL;
+  }
+  file_close(cur -> cur_file);
 
   sema_up(&cur -> wait_child);
 	sema_down(&cur -> exit_child);
@@ -405,7 +409,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
   return success;
 }
 

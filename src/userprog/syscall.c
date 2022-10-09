@@ -53,8 +53,10 @@ int open (const char *file, struct intr_frame *f)
   struct file* fp = filesys_open(file);
 
   if (fp == NULL)
+  {
+    lock_release(&filesys_lock);
     return -1;
-
+  }
   struct thread *cur_thread = thread_current();
   for (int i = 3; i < 128; i++)
   {
@@ -72,10 +74,19 @@ int open (const char *file, struct intr_frame *f)
 
 int filesize (int fd, struct intr_frame *f)
 {
+  lock_acquire(&filesys_lock);  
   struct file* file = thread_current() -> t_fd[fd];
 
-  if (file == NULL) exit(-1, f);
-  return file_length(file);
+  if (file == NULL)
+  {
+    lock_release(&filesys_lock);
+     exit(-1, f);
+  }
+
+  int ret = file_length(file);
+
+  lock_release(&filesys_lock);
+  return ret;
 }
       
 
@@ -89,24 +100,25 @@ int read (int fd, void *buffer, unsigned len, struct intr_frame *f)
   {
     for (i = 0; i < len; i++)
     {
-      if (input_getc() == '\0') break;
+      *(char *)(buffer + i) = input_getc(); 
+      if (*(char*)(buffer + i) == '\0') break;
     }
     total_len = i;
   }
-  else if (fd == 1)
+  else if (fd <= 1 || fd >= 128)
   {
     lock_release(&filesys_lock);
-    exit(-1, f);
+    return -1;
   }
   else
   {
     struct file* file = thread_current() -> t_fd[fd];
     if (file == NULL)
-      {
-        lock_release(&filesys_lock);
-        exit(-1, f);
-      }
-      total_len = file_read(file, buffer, len);
+    {
+      lock_release(&filesys_lock);
+      exit(-1, f);
+    }
+    total_len = file_read(file, buffer, len);
   }
 
   lock_release(&filesys_lock);
@@ -124,19 +136,19 @@ int write (int fd, const void* buffer, unsigned len, struct intr_frame *f)
     putbuf(buffer, len);
     total_len = len;
   }
-  else if (fd == 0)
+  else if (fd <= 0 || fd >= 128)
   {
     lock_release(&filesys_lock);
-    exit(-1, f);
+    return 0;
   }
   else
   {
     struct file* file = thread_current() -> t_fd[fd];
     if (file == NULL)
-      {
-        lock_release(&filesys_lock);
-        exit(-1, f);
-      }
+    {
+      lock_release(&filesys_lock);
+      exit(-1, f);
+    }
     if (file -> deny_write == false) total_len = file_write(file, buffer, len);
   }
 
@@ -148,7 +160,11 @@ void seek (int fd, unsigned pos, struct intr_frame *f)
 {
   lock_acquire(&filesys_lock);
   struct file* file = thread_current() -> t_fd[fd];
-  if (file == NULL) exit(-1, f);
+  if (file == NULL)
+  {
+    lock_release(&filesys_lock);
+    exit(-1, f);
+  }
 
   file_seek(file, pos);
   lock_release(&filesys_lock);
@@ -159,7 +175,11 @@ unsigned tell (int fd, struct intr_frame *f)
   lock_acquire(&filesys_lock);
 
   struct file* file = thread_current() -> t_fd[fd];
-  if (file == NULL) exit(-1, f);
+  if (file == NULL)
+  {
+    lock_release(&filesys_lock);
+    exit(-1, f);
+  }
   unsigned ret = file_tell(file);
 
   lock_release(&filesys_lock);
@@ -170,8 +190,17 @@ void close (int fd, struct intr_frame *f)
 {
   lock_acquire(&filesys_lock);
 
+  if (fd < 3 || fd > 128)
+  {
+    lock_release(&filesys_lock);
+    exit(-1, f);
+  }
   struct file* file = thread_current() -> t_fd[fd];
-  if (file == NULL) exit(-1, f);
+  if (file == NULL)
+  {
+    lock_release(&filesys_lock);
+    exit(-1, f);
+  }
   thread_current() -> t_fd[fd] = NULL;
   file_close(file);
 
@@ -212,6 +241,11 @@ void check_valid (void *ptr, struct intr_frame *f, int size)
       exit (-1, f);
     }
   return;
+}
+
+void check_buffer (void *ptr, struct intr_frame *f, int size)
+{
+  for (int i = 0; i < size; i++) check_valid(ptr, f, 1);
 }
 
 static void
@@ -262,16 +296,16 @@ syscall_handler (struct intr_frame *f UNUSED)
       check_valid(&ptr[1], f, sizeof(unsigned int));
       f -> eax = filesize(ptr[1], f);
       break;
-    case SYS_READ: // 1 : int fd, 2 : void *buffer, unsigned size
+    case SYS_READ: // 1 : int fd, 2 : void *buffer, 3 : unsigned size
       check_valid(&ptr[1], f, 3 * sizeof(unsigned int));
-      check_valid((void*) ptr[2], f, ptr[3]);
-      if ((int) ptr[1] == 0 && (void*) ptr[2] == NULL) exit(-1, f);
+      if ((void*) ptr[2] == NULL) exit(-1, f);
+      check_buffer((void*) ptr[2], f, ptr[3]);
       f -> eax = read((int) ptr[1], (void*) ptr[2], (size_t) ptr[3], f);
       break;
-    case SYS_WRITE: // 1 : int fd, 2 : void *buffer, unsigned size
+    case SYS_WRITE: // 1 : int fd, 2 : void *buffer, 3 : unsigned size
       check_valid(&ptr[1], f, 3 * sizeof(unsigned int));
-      check_valid((void*) ptr[2], f, ptr[3]);
-      if ((int) ptr[1] == 1 && (void*) ptr[2] == NULL) exit(-1, f);
+      if ((void*) ptr[2] == NULL) exit(-1, f);
+      check_buffer((void*) ptr[2], f, ptr[3]);
       f -> eax = write((int) ptr[1], (void*) ptr[2], (size_t) ptr[3], f);
       break;
     case SYS_SEEK: // 1 : fd, 2 : position

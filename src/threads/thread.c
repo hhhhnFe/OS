@@ -472,6 +472,8 @@ init_thread (struct thread *t, const char *name, int priority)
 	/*exit status flag*/
 	t->fl = 0;
 
+  t->t_fd[0] = STDIN_FILENO;
+  t->t_fd[1] = STDOUT_FILENO;
   for (int i = 3; i < 128; i++)
   {
     t->t_fd[i] = NULL;
