@@ -54,7 +54,7 @@ bool remove (const char *file)
   lock_acquire(&filesys_lock);
   ret = filesys_remove(file);
   lock_release(&filesys_lock);
-  return ret;
+  return bool;
 }
 
 int open (const char *file, struct intr_frame *f)
