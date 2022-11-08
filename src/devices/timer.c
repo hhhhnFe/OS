@@ -30,6 +30,9 @@ static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
 
+static struct list sleep_queue;
+static struct thread *idle_thread;
+
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
 void
@@ -37,6 +40,7 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+  list_init(&sleep_queue);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -90,10 +94,17 @@ void
 timer_sleep (int64_t ticks) 
 {
   int64_t start = timer_ticks ();
+  struct thread *cur = thread_current();
+  ASSERT(cur != idle_thread);
 
-  ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+  enum intr_level old_level = intr_disable ();
+  
+  cur -> sleep_ticks = ticks;
+  cur -> start_of_sleep = start;
+  list_push_back(&sleep_queue, &cur -> elem);
+
+  thread_block();
+  intr_set_level (old_level);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -171,6 +182,36 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
+  struct thread* t;
+
+  if ((thread_mlfqs || thread_prior_aging) && thread_current() != idle_thread)
+    thread_current() -> recent_cpu += 1*FRACTION;
+
+  for (struct list_elem *e = list_begin(&sleep_queue); e != list_end(&sleep_queue); )
+  {
+    t = list_entry(e, struct thread, elem);
+
+    if (timer_elapsed(t -> start_of_sleep) >= t -> sleep_ticks)
+    {
+      e = list_remove(e);
+      thread_unblock(t);
+    }
+    else e = list_next(e);
+  }
+
+  if (thread_prior_aging || thread_mlfqs)
+  {
+    thread_current()->recent_cpu += 1;
+    if (timer_ticks() % TIMER_FREQ == 0)
+    {
+      update_load_and_recent_cpu();
+    }
+    if (timer_ticks() % 4 == 0)
+    {
+      update_priority_by_aging();
+    }
+  }
+
   thread_tick ();
 }
 

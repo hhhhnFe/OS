@@ -6,6 +6,10 @@
 #include <stdint.h>
 #include "threads/synch.h"
 
+#ifndef USERPROG
+extern bool thread_prior_aging;
+#endif
+
 /* States in a thread's life cycle. */
 enum thread_status
   {
@@ -25,6 +29,7 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+#define FRACTION (1<<14)
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -94,6 +99,10 @@ struct thread
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
+    int64_t sleep_ticks;
+    int64_t start_of_sleep;
+    int64_t recent_cpu;
+    int64_t nice;
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
    uint32_t *pagedir;                  /* Page directory. */
@@ -147,5 +156,10 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+bool thread_priority_cmp (struct list_elem *, struct list_elem *, void *);
+void thread_preemption (void);
+void update_priority_by_aging(void);
+void update_load_and_recent_cpu(void);
 
 #endif /* threads/thread.h */
