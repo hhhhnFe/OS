@@ -185,7 +185,7 @@ timer_interrupt (struct intr_frame *args UNUSED)
   struct thread* t;
 
   if ((thread_mlfqs || thread_prior_aging) && thread_current() != idle_thread)
-    thread_current() -> recent_cpu += 1*FRACTION;
+    thread_current() -> recent_cpu += FRACTION;
 
   for (struct list_elem *e = list_begin(&sleep_queue); e != list_end(&sleep_queue); )
   {

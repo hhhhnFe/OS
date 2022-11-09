@@ -690,7 +690,7 @@ void update_load_and_recent_cpu(void)
   {
     t = list_entry(e, struct thread, allelem);
     if (t != idle_thread)
-      t -> recent_cpu = ((int64_t)((int64_t)2*load_avg) * FRACTION / (2*load_avg + (1*FRACTION))) * t->recent_cpu / FRACTION + t->nice * FRACTION;
+      t -> recent_cpu = ((int64_t)((int64_t)2*load_avg) * FRACTION / (2*load_avg + FRACTION)) * t->recent_cpu / FRACTION + t->nice * FRACTION;
   }
 }
 
